@@ -279,6 +279,7 @@ const PlacesSidebar = React.memo(function PlacesSidebar({
 
   const filtered = useMemo(() => places.filter(p => {
     if (filter === 'unplanned' && plannedIds.has(p.id)) return false
+    if (filter === 'planned' && !plannedIds.has(p.id)) return false
     if (filter === 'tracks' && !p.route_geometry) return false
     if (categoryFilters.size > 0) {
       if (p.category_id == null) {
@@ -391,14 +392,16 @@ const PlacesSidebar = React.memo(function PlacesSidebar({
           })
           const counts = {
             all: baseFiltered.length,
+            planned: baseFiltered.filter(p => plannedIds.has(p.id)).length,
             unplanned: baseFiltered.filter(p => !plannedIds.has(p.id)).length,
             tracks: baseFiltered.filter(p => p.route_geometry).length,
           }
           const tabs = ([
             { id: 'all', label: t('places.all') },
+            { id: 'planned', label: t('pdf.planned') },
             { id: 'unplanned', label: t('places.unplanned') },
             hasTracks ? { id: 'tracks', label: t('places.filterTracks') } : null,
-          ] as const).filter(Boolean) as Array<{ id: 'all' | 'unplanned' | 'tracks'; label: string }>
+          ] as const).filter(Boolean) as Array<{ id: 'all' | 'planned' | 'unplanned' | 'tracks'; label: string }>
           return (
             <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
               {tabs.map(f => {
@@ -640,7 +643,11 @@ const PlacesSidebar = React.memo(function PlacesSidebar({
         {filtered.length === 0 ? (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 16px', gap: 8 }}>
             <span style={{ fontSize: 13, color: 'var(--text-faint)' }}>
-              {filter === 'unplanned' ? t('places.allPlanned') : t('places.noneFound')}
+              {filter === 'unplanned'
+                ? t('places.allPlanned')
+                : filter === 'planned'
+                  ? t('places.nonePlanned')
+                  : t('places.noneFound')}
             </span>
             {canEditPlaces && <button onClick={onAddPlace} style={{ fontSize: 12, color: 'var(--text-primary)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline', fontFamily: 'inherit' }}>
               {t('places.addPlace')}

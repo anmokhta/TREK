@@ -378,12 +378,13 @@ export default function TripPlannerPage(): React.ReactElement | null {
     }
 
     // Build set of planned place IDs for unplanned filter
-    const plannedIds = mapPlacesFilter === 'unplanned'
+    const plannedIds = mapPlacesFilter === 'unplanned' || mapPlacesFilter === 'planned'
       ? new Set(Object.values(assignments).flatMap(da => da.map(a => a.place?.id).filter(Boolean)))
       : null
 
     return places.filter(p => {
       if (!p.lat || !p.lng) return false
+      if (mapPlacesFilter === 'planned' && plannedIds && !plannedIds.has(p.id)) return false
       if (mapPlacesFilter === 'tracks' && !p.route_geometry) return false
       if (mapCategoryFilter.size > 0) {
         if (p.category_id == null) {
@@ -391,7 +392,7 @@ export default function TripPlannerPage(): React.ReactElement | null {
         } else if (!mapCategoryFilter.has(String(p.category_id))) return false
       }
       if (hiddenPlaceIds.has(p.id)) return false
-      if (plannedIds && plannedIds.has(p.id)) return false
+      if (mapPlacesFilter === 'unplanned' && plannedIds && plannedIds.has(p.id)) return false
       return true
     })
   }, [places, mapCategoryFilter, mapPlacesFilter, assignments, expandedDayIds])

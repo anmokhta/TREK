@@ -1085,6 +1085,7 @@ const en: Record<string, string | { name: string; category: string }[]> = {
   'places.assignToDay': 'Add to which day?',
   'places.all': 'All',
   'places.unplanned': 'Unplanned',
+  'places.nonePlanned': 'No planned places found',
   'places.filterTracks': 'Tracks',
   'places.search': 'Search places...',
   'places.allCategories': 'All Categories',
