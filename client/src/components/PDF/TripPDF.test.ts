@@ -291,4 +291,38 @@ describe('downloadTripPDF', () => {
     // The empty-day div should appear (contains the translation key for empty day)
     expect(iframe!.srcdoc).toContain('dayplan.emptyDay')
   })
+
+  it('FE-COMP-TRIPPDF-021: renders day map image when day has geo-assigned places', async () => {
+    const geoPlace = { ...placeWithDetails, id: 101, lat: 41.8902, lng: 12.4922 }
+    const args = {
+      ...richArgs,
+      assignments: {
+        '10': [{ ...assignmentForDay, place: geoPlace }],
+      } as any,
+    }
+    await downloadTripPDF(args)
+    const iframe = getIframe()
+    expect(iframe!.srcdoc).toContain('day-map-img')
+    expect(iframe!.srcdoc).toContain('data:image/svg+xml')
+  })
+
+  it('FE-COMP-TRIPPDF-022: each day map contains only that day coordinates', async () => {
+    const dayA = { id: 10, day_number: 1, title: 'Day A', date: '2025-06-01' } as any
+    const dayB = { id: 11, day_number: 2, title: 'Day B', date: '2025-06-02' } as any
+    const placeA = { ...placeWithDetails, id: 201, lat: 41.8902, lng: 12.4922, name: 'A' }
+    const placeB = { ...placeWithDetails, id: 202, lat: 48.8584, lng: 2.2945, name: 'B' }
+    const args = {
+      ...richArgs,
+      days: [dayA, dayB],
+      assignments: {
+        '10': [{ ...assignmentForDay, id: 301, day_id: 10, place: placeA }],
+        '11': [{ ...assignmentForDay, id: 302, day_id: 11, place: placeB }],
+      } as any,
+    }
+    await downloadTripPDF(args)
+    const iframe = getIframe()
+    const srcdoc = iframe!.srcdoc
+    expect(srcdoc).toContain('data-coords="41.8902,12.4922"')
+    expect(srcdoc).toContain('data-coords="48.8584,2.2945"')
+  })
 })

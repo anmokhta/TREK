@@ -1,9 +1,12 @@
 // Trip PDF via browser print window
 import { createElement } from 'react'
+import { createRoot } from 'react-dom/client'
 import { getCategoryIcon } from '../shared/categoryIcons'
 import { FileText, Info, Clock, MapPin, Navigation, Train, Plane, Bus, Car, Ship, Coffee, Ticket, Star, Heart, Camera, Flag, Lightbulb, AlertTriangle, ShoppingBag, Bookmark, Hotel, LogIn, LogOut, KeyRound, BedDouble, Utensils, Users, LucideIcon } from 'lucide-react'
 import { accommodationsApi, mapsApi } from '../../api/client'
 import type { Trip, Day, Place, Category, AssignmentsMap, DayNotesMap } from '../../types'
+import { MapViewAuto } from '../Map/MapViewAuto'
+import html2canvas from 'html2canvas'
 
 function renderLucideIcon(icon:LucideIcon, props = {}) {
   if (!_renderToStaticMarkup) return ''
@@ -90,6 +93,217 @@ function dayCost(assignments, dayId, locale) {
   return total > 0 ? `${total.toLocaleString(locale)} EUR` : null
 }
 
+function haversineKm(aLat: number, aLng: number, bLat: number, bLng: number) {
+  const toRad = (v: number) => (v * Math.PI) / 180
+  const R = 6371
+  const dLat = toRad(bLat - aLat)
+  const dLng = toRad(bLng - aLng)
+  const q =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) *
+    Math.sin(dLng / 2) * Math.sin(dLng / 2)
+  return 2 * R * Math.atan2(Math.sqrt(q), Math.sqrt(1 - q))
+}
+
+function getDayMapSvgDataUri(dayPlaces, transparent = false, projection: any = null) {
+  const geo = (dayPlaces || []).filter((p: any) => p?.lat && p?.lng).slice(0, 30)
+  if (!geo.length) return { src: null, coordSummary: '' }
+
+  const pad = 18
+  const width = 1000
+  const height = 300
+  const lats = geo.map((p: any) => Number(p.lat))
+  const lngs = geo.map((p: any) => Number(p.lng))
+  const minLat = Math.min(...lats)
+  const maxLat = Math.max(...lats)
+  const minLng = Math.min(...lngs)
+  const maxLng = Math.max(...lngs)
+
+  const latRange = Math.max(0.01, maxLat - minLat)
+  const lngRange = Math.max(0.01, maxLng - minLng)
+  const drawableW = width - pad * 2
+  const drawableH = height - pad * 2
+
+  const points = geo.map((p: any) => {
+    if (projection && Number.isFinite(projection.zoom) && Number.isFinite(projection.topLeftX) && Number.isFinite(projection.topLeftY)) {
+      const wp = latLngToWorldPixel(Number(p.lat), Number(p.lng), Number(projection.zoom))
+      return {
+        x: wp.x - Number(projection.topLeftX),
+        y: wp.y - Number(projection.topLeftY),
+        lat: Number(p.lat),
+        lng: Number(p.lng),
+      }
+    }
+    const x = pad + ((Number(p.lng) - minLng) / lngRange) * drawableW
+    const y = pad + (1 - (Number(p.lat) - minLat) / latRange) * drawableH
+    return { x, y, lat: Number(p.lat), lng: Number(p.lng) }
+  })
+
+  const polyline = points.map(pt => `${pt.x.toFixed(2)},${pt.y.toFixed(2)}`).join(' ')
+  let totalKm = 0
+  for (let i = 1; i < points.length; i++) {
+    totalKm += haversineKm(points[i - 1].lat, points[i - 1].lng, points[i].lat, points[i].lng)
+  }
+  const walkMin = Math.max(1, Math.round((totalKm / 4.8) * 60))
+  const driveMin = Math.max(1, Math.round((totalKm / 38) * 60))
+  const durationBadge = points.length > 1 ? `
+    <g>
+      <rect x="${(width / 2 - 84).toFixed(2)}" y="${(height / 2 - 20).toFixed(2)}" rx="14" ry="14" width="168" height="34" fill="#111827" opacity="0.94" />
+      <text x="${(width / 2).toFixed(2)}" y="${(height / 2 + 2).toFixed(2)}" text-anchor="middle" font-size="15" fill="#ffffff" font-weight="600" font-family="Poppins, sans-serif">🚶 ${walkMin} min  |  🚗 ${driveMin} min</text>
+    </g>
+  ` : ''
+
+  const circles = points.map((pt, i) => `
+    <g>
+      <circle cx="${pt.x.toFixed(2)}" cy="${pt.y.toFixed(2)}" r="20" fill="#ffffff" stroke="#d1d5db" stroke-width="2" />
+      <circle cx="${pt.x.toFixed(2)}" cy="${pt.y.toFixed(2)}" r="16" fill="#dbeafe" />
+      <text x="${pt.x.toFixed(2)}" y="${(pt.y + 5).toFixed(2)}" text-anchor="middle" font-size="14" fill="#111827" font-weight="700" font-family="Poppins, sans-serif">${i + 1}</text>
+      <desc>${pt.lat},${pt.lng}</desc>
+    </g>
+  `).join('')
+
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+      <defs>
+        <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#eef2ff"/>
+          <stop offset="100%" stop-color="#e0f2fe"/>
+        </linearGradient>
+      </defs>
+      ${transparent ? '' : `<rect width="${width}" height="${height}" fill="url(#bg)" />`}
+      <g opacity="0.25" stroke="#94a3b8" stroke-width="1">
+        <line x1="0" y1="${height / 3}" x2="${width}" y2="${height / 3}" />
+        <line x1="0" y1="${(height / 3) * 2}" x2="${width}" y2="${(height / 3) * 2}" />
+        <line x1="${width / 3}" y1="0" x2="${width / 3}" y2="${height}" />
+        <line x1="${(width / 3) * 2}" y1="0" x2="${(width / 3) * 2}" y2="${height}" />
+      </g>
+      ${points.length > 1 ? `<polyline points="${polyline}" fill="none" stroke="#1f2937" stroke-width="4" opacity="0.75" stroke-dasharray="8 8" stroke-linecap="round" stroke-linejoin="round" />` : ''}
+      ${durationBadge}
+      ${circles}
+    </svg>
+  `
+  const coordSummary = points.map(pt => `${pt.lat},${pt.lng}`).join(';')
+  const outOfBounds = points.filter((pt: any) => pt.x < -24 || pt.x > width + 24 || pt.y < -24 || pt.y > height + 24).length
+  return { src: `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`, coordSummary, outOfBounds, pointCount: points.length }
+}
+
+function latLngToWorldPixel(lat: number, lng: number, zoom: number) {
+  const scale = 256 * Math.pow(2, zoom)
+  const x = ((lng + 180) / 360) * scale
+  const sin = Math.sin((lat * Math.PI) / 180)
+  const y = (0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * scale
+  return { x, y }
+}
+
+function chooseTileZoom(geo: any[], width: number, height: number) {
+  const lats = geo.map((p: any) => Number(p.lat))
+  const lngs = geo.map((p: any) => Number(p.lng))
+  const minLat = Math.min(...lats)
+  const maxLat = Math.max(...lats)
+  const minLng = Math.min(...lngs)
+  const maxLng = Math.max(...lngs)
+  for (let zoom = 16; zoom >= 8; zoom--) {
+    const nw = latLngToWorldPixel(maxLat, minLng, zoom)
+    const se = latLngToWorldPixel(minLat, maxLng, zoom)
+    if ((se.x - nw.x) <= width * 0.72 && (se.y - nw.y) <= height * 0.72) return zoom
+  }
+  return 8
+}
+
+async function buildDayMapTileBase(dayPlaces: any[]) {
+  const geo = (dayPlaces || []).filter((p: any) => p?.lat && p?.lng)
+  if (!geo.length || typeof window === 'undefined' || typeof document === 'undefined') return null
+  if ((import.meta as any)?.env?.MODE === 'test' || (/jsdom/i).test(navigator.userAgent || '')) return null
+  const width = 1000
+  const height = 300
+  const zoom = chooseTileZoom(geo, width, height)
+  const centerLat = geo.reduce((sum: number, p: any) => sum + Number(p.lat), 0) / geo.length
+  const centerLng = geo.reduce((sum: number, p: any) => sum + Number(p.lng), 0) / geo.length
+  const center = latLngToWorldPixel(centerLat, centerLng, zoom)
+  const topLeftX = center.x - width / 2
+  const topLeftY = center.y - height / 2
+  const minTileX = Math.floor(topLeftX / 256)
+  const maxTileX = Math.floor((topLeftX + width) / 256)
+  const minTileY = Math.floor(topLeftY / 256)
+  const maxTileY = Math.floor((topLeftY + height) / 256)
+  const tileSpan = Math.pow(2, zoom)
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return null
+  ctx.fillStyle = '#eef2ff'
+  ctx.fillRect(0, 0, width, height)
+  let drawn = 0
+  const started = Date.now()
+  await Promise.all(Array.from({ length: maxTileX - minTileX + 1 }).flatMap((_, xi) => {
+    const tileX = minTileX + xi
+    return Array.from({ length: maxTileY - minTileY + 1 }).map(async (_, yi) => {
+      const tileY = minTileY + yi
+      if (tileY < 0 || tileY >= tileSpan) return
+      const wrappedTileX = ((tileX % tileSpan) + tileSpan) % tileSpan
+      try {
+        const url = `https://tile.openstreetmap.org/${zoom}/${wrappedTileX}/${tileY}.png`
+        const res = await fetch(url, { mode: 'cors' })
+        if (!res.ok) return
+        const blob = await res.blob()
+        const objectUrl = URL.createObjectURL(blob)
+        try {
+          const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+            const im = new Image()
+            im.onload = () => resolve(im)
+            im.onerror = reject
+            im.src = objectUrl
+          })
+          const px = tileX * 256 - topLeftX
+          const py = tileY * 256 - topLeftY
+          ctx.drawImage(img, px, py, 256, 256)
+          drawn += 1
+        } finally {
+          URL.revokeObjectURL(objectUrl)
+        }
+      } catch {}
+    })
+  }))
+  // #region agent log
+  fetch('http://127.0.0.1:7866/ingest/26632cea-2631-44e3-813d-bd32f54c9e64',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c1b570'},body:JSON.stringify({sessionId:'c1b570',runId:'pdf-map-debug-3',hypothesisId:'H8',location:'TripPDF.tsx:buildDayMapTileBase',message:'Built OSM tile base map',data:{geoCount:geo.length,zoom,tileCount:(maxTileX-minTileX+1)*(maxTileY-minTileY+1),drawnTiles:drawn,elapsedMs:Date.now()-started},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
+  return drawn > 0 ? {
+    src: canvas.toDataURL('image/png'),
+    projection: { zoom, topLeftX, topLeftY, width, height },
+  } : null
+}
+
+async function composeMapLayers(baseSrc: string | null, overlaySrc: string | null) {
+  if (!baseSrc) return null
+  if (!overlaySrc) return baseSrc
+  if ((import.meta as any)?.env?.MODE === 'test' || (/jsdom/i).test(navigator.userAgent || '')) return baseSrc
+  try {
+    const [baseImg, overlayImg] = await Promise.all([new Promise<HTMLImageElement>((resolve, reject) => {
+      const img = new Image()
+      img.crossOrigin = 'anonymous'
+      img.onload = () => resolve(img)
+      img.onerror = reject
+      img.src = baseSrc
+    }), new Promise<HTMLImageElement>((resolve, reject) => {
+      const img = new Image()
+      img.onload = () => resolve(img)
+      img.onerror = reject
+      img.src = overlaySrc
+    })])
+    const canvas = document.createElement('canvas')
+    canvas.width = baseImg.width || 1000
+    canvas.height = baseImg.height || 300
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return baseSrc
+    ctx.drawImage(baseImg, 0, 0, canvas.width, canvas.height)
+    ctx.drawImage(overlayImg, 0, 0, canvas.width, canvas.height)
+    return canvas.toDataURL('image/png')
+  } catch {
+    return baseSrc
+  }
+}
+
 // Pre-fetch Google Place photos for all assigned places
 async function fetchPlacePhotos(assignments) {
   const photoMap = {} // placeId → photoUrl
@@ -140,6 +354,47 @@ export async function downloadTripPDF({ trip, days, places, assignments, categor
   const totalCost = Object.values(assignments || {})
     .flatMap(a => a).reduce((s, a) => s + (parseFloat(a.place?.price) || 0), 0)
 
+  const dayMapDataById: Record<string, { screenshotSrc: string | null, coordSummary: string }> = {}
+  const mapBuildStartedAt = Date.now()
+  await Promise.all(sorted.map(async (day) => {
+    const perDayStartedAt = Date.now()
+    const assigned = assignments[String(day.id)] || []
+    const dayMapPlaces = [...new Map(
+      assigned.map(a => [a.place?.id, a.place]).filter(([, p]) => p?.lat && p?.lng)
+    ).values()]
+    // #region agent log
+    fetch('http://127.0.0.1:7866/ingest/26632cea-2631-44e3-813d-bd32f54c9e64',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c1b570'},body:JSON.stringify({sessionId:'c1b570',runId:'pdf-map-debug-1',hypothesisId:'H2',location:'TripPDF.tsx:dayMapPlaces',message:'Computed day geo places for PDF map',data:{dayId:day.id,assignedCount:assigned.length,geoCount:dayMapPlaces.length,geoPlaceIds:dayMapPlaces.map((p:any)=>p?.id)},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    const coords = dayMapPlaces.map((p: any) => `${Number(p.lat)},${Number(p.lng)}`).join(';')
+    const tileBase = await buildDayMapTileBase(dayMapPlaces)
+    const overlay = getDayMapSvgDataUri(dayMapPlaces, true, tileBase?.projection || null)
+    // #region agent log
+    fetch('http://127.0.0.1:7866/ingest/26632cea-2631-44e3-813d-bd32f54c9e64',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c1b570'},body:JSON.stringify({sessionId:'c1b570',runId:'pdf-map-debug-2',hypothesisId:'H5',location:'TripPDF.tsx:overlayGeneration',message:'Generated overlay SVG metadata',data:{dayId:day.id,overlayPresent:!!overlay.src,overlayLength:overlay.src?String(overlay.src).length:0,coordSummary:coords,outOfBounds:overlay.outOfBounds,pointCount:overlay.pointCount},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    if (tileBase?.src) {
+      const merged = await composeMapLayers(tileBase.src, overlay.src)
+      // #region agent log
+      fetch('http://127.0.0.1:7866/ingest/26632cea-2631-44e3-813d-bd32f54c9e64',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c1b570'},body:JSON.stringify({sessionId:'c1b570',runId:'pdf-map-debug-3',hypothesisId:'H10',location:'TripPDF.tsx:composeMapLayers',message:'Composed OSM base with route overlay',data:{dayId:day.id,merged:!!merged,mergedPrefix:merged?String(merged).slice(0,32):null,mergedLength:merged?String(merged).length:0},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+      dayMapDataById[String(day.id)] = { screenshotSrc: merged, coordSummary: coords }
+      // #region agent log
+      fetch('http://127.0.0.1:7866/ingest/26632cea-2631-44e3-813d-bd32f54c9e64',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c1b570'},body:JSON.stringify({sessionId:'c1b570',runId:'pdf-map-debug-3',hypothesisId:'H9',location:'TripPDF.tsx:mapSourceSelection',message:'Using OSM tile base for day map',data:{dayId:day.id,overlayPresent:!!overlay.src,coordSummary:coords},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+    } else {
+      const fallback = getDayMapSvgDataUri(dayMapPlaces, false)
+      dayMapDataById[String(day.id)] = { screenshotSrc: fallback.src, coordSummary: fallback.coordSummary }
+      // #region agent log
+      fetch('http://127.0.0.1:7866/ingest/26632cea-2631-44e3-813d-bd32f54c9e64',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c1b570'},body:JSON.stringify({sessionId:'c1b570',runId:'pdf-map-debug-3',hypothesisId:'H9',location:'TripPDF.tsx:mapSourceSelection',message:'Falling back to generated SVG day map',data:{dayId:day.id,fallbackPresent:!!fallback.src,fallbackCoordSummary:fallback.coordSummary},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+    }
+    // #region agent log
+    fetch('http://127.0.0.1:7866/ingest/26632cea-2631-44e3-813d-bd32f54c9e64',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c1b570'},body:JSON.stringify({sessionId:'c1b570',runId:'pdf-map-debug-3',hypothesisId:'H7',location:'TripPDF.tsx:perDayMapTiming',message:'Per-day map generation timing',data:{dayId:day.id,elapsedMs:Date.now()-perDayStartedAt,usedOsmTiles:!!tileBase?.src,geoCount:dayMapPlaces.length},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+  }))
+  // #region agent log
+  fetch('http://127.0.0.1:7866/ingest/26632cea-2631-44e3-813d-bd32f54c9e64',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c1b570'},body:JSON.stringify({sessionId:'c1b570',runId:'pdf-map-debug-2',hypothesisId:'H7',location:'TripPDF.tsx:totalMapTiming',message:'Total map generation timing for PDF',data:{dayCount:sorted.length,totalElapsedMs:Date.now()-mapBuildStartedAt},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
+
   // Span helpers for multi-day transport (mirrors DayPlanSidebar logic)
   const pdfGetDayOrder = (d: Day) => d.day_number
   const pdfGetSpanPhase = (r: any, dayId: number): 'single' | 'start' | 'middle' | 'end' => {
@@ -180,6 +435,10 @@ export async function downloadTripPDF({ trip, days, places, assignments, categor
   // Build day HTML
   const daysHtml = sorted.map((day, di) => {
     const assigned = assignments[String(day.id)] || []
+    const dayMapData = dayMapDataById[String(day.id)] || { screenshotSrc: null, coordSummary: '' }
+    // #region agent log
+    fetch('http://127.0.0.1:7866/ingest/26632cea-2631-44e3-813d-bd32f54c9e64',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c1b570'},body:JSON.stringify({sessionId:'c1b570',runId:'pdf-map-debug-1',hypothesisId:'H4',location:'TripPDF.tsx:daysHtml',message:'Rendering day map block',data:{dayId:day.id,hasBase:!!dayMapData.screenshotSrc,coordSummary:dayMapData.coordSummary},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     const notes = (dayNotes || []).filter(n => n.day_id === day.id)
     const cost = dayCost(assignments, day.id, loc)
 
@@ -326,7 +585,14 @@ export async function downloadTripPDF({ trip, days, places, assignments, categor
           ${day.date ? `<span class="day-date">${shortDate(day.date, loc)}</span>` : ''}
           ${cost ? `<span class="day-cost">${cost}</span>` : ''}
         </div>
-        <div class="day-body">${accommodationsHtml}${itemsHtml}</div>
+        <div class="day-body">
+          ${accommodationsHtml}${itemsHtml}
+          ${dayMapData.screenshotSrc ? `
+            <div class="day-map-wrap">
+              <img class="day-map-img day-map-base" data-coords="${escHtml(dayMapData.coordSummary)}" src="${escHtml(dayMapData.screenshotSrc)}" alt="${escHtml(`Day ${day.day_number} map`)}" />
+            </div>
+          ` : ''}
+        </div>
       </div>`  
   }).join('')
 
@@ -409,6 +675,21 @@ export async function downloadTripPDF({ trip, days, places, assignments, categor
   .day-date  { font-size: 9px; color: rgba(255,255,255,0.45); }
   .day-cost  { font-size: 9px; font-weight: 600; color: rgba(255,255,255,0.65); }
   .day-body  { padding: 12px 28px 6px; }
+  .day-map-wrap {
+    border: 1px solid #dbe3ef;
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 10px;
+    page-break-inside: avoid;
+    background: #f8fafc;
+    position: relative;
+  }
+  .day-map-img {
+    width: 100%;
+    height: 176px;
+    object-fit: cover;
+    display: block;
+  }
 
   /* accommodation info */
   .day-accommodations-overview { font-size: 12px; }
