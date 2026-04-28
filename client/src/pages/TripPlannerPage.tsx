@@ -389,15 +389,15 @@ export default function TripPlannerPage(): React.ReactElement | null {
 
     return places.filter(p => {
       if (!p.lat || !p.lng) return false
-      if (mapPlacesFilter === 'tracks' && !p.route_geometry) return false
-      if (mapCategoryFilter.size > 0) {
+      if (focusedMapDayId == null && mapPlacesFilter === 'tracks' && !p.route_geometry) return false
+      if (focusedMapDayId == null && mapCategoryFilter.size > 0) {
         if (p.category_id == null) {
           if (!mapCategoryFilter.has('uncategorized')) return false
         } else if (!mapCategoryFilter.has(String(p.category_id))) return false
       }
       if (focusedPlaceIds && !focusedPlaceIds.has(p.id)) return false
       if (hiddenPlaceIds.has(p.id)) return false
-      if (plannedIds && plannedIds.has(p.id)) return false
+      if (focusedMapDayId == null && plannedIds && plannedIds.has(p.id)) return false
       return true
     })
   }, [places, mapCategoryFilter, mapPlacesFilter, assignments, expandedDayIds, focusedMapDayId])
@@ -1012,6 +1012,8 @@ export default function TripPlannerPage(): React.ReactElement | null {
                     onBulkDeletePlaces={(ids) => setDeletePlaceIds(ids)}
                     onCategoryFilterChange={setMapCategoryFilter}
                     onPlacesFilterChange={setMapPlacesFilter}
+                    hideFilters={focusedMapDayId != null}
+                    focusedDayId={focusedMapDayId}
                     pushUndo={pushUndo}
                   />
                 </div>
@@ -1168,7 +1170,7 @@ export default function TripPlannerPage(): React.ReactElement | null {
                   <div style={{ flex: 1, overflow: 'auto' }}>
                     {mobileSidebarOpen === 'left'
                       ? <DayPlanSidebar tripId={tripId} trip={trip} days={days} places={places} categories={categories} assignments={assignments} selectedDayId={selectedDayId} selectedPlaceId={selectedPlaceId} selectedAssignmentId={selectedAssignmentId} onSelectDay={(id) => { handleSelectDay(id); setMobileSidebarOpen(null) }} onPlaceClick={(placeId, assignmentId) => { handlePlaceClick(placeId, assignmentId); setMobileSidebarOpen(null) }} onReorder={handleReorder} onUpdateDayTitle={handleUpdateDayTitle} onAssignToDay={handleAssignToDay} onRouteCalculated={(r) => { if (r) { setRoute(r.coordinates); setRouteInfo({ distance: r.distanceText, duration: r.durationText }) } }} reservations={reservations} visibleConnectionIds={visibleConnections} onToggleConnection={toggleConnection} onAddReservation={(dayId) => { setEditingReservation(null); tripActions.setSelectedDay(dayId); setShowReservationModal(true); setMobileSidebarOpen(null) }} onAddPlace={() => { setEditingPlace(null); setShowPlaceForm(true); setMobileSidebarOpen(null) }} onDayDetail={(day) => { setShowDayDetail(day); setSelectedPlaceId(null); selectAssignment(null); setMobileSidebarOpen(null) }} accommodations={tripAccommodations} onNavigateToFiles={() => { setMobileSidebarOpen(null); handleTabChange('dateien') }} onExpandedDaysChange={setExpandedDayIds} focusedMapDayId={focusedMapDayId} onFocusedMapDayChange={setFocusedMapDayId} pushUndo={pushUndo} canUndo={canUndo} lastActionLabel={lastActionLabel} onUndo={handleUndo} onEditTransport={can('day_edit', trip) ? (reservation) => { setEditingTransport(reservation); setTransportModalDayId(reservation.day_id ?? null); setShowTransportModal(true); setMobileSidebarOpen(null) } : undefined} onEditReservation={can('reservation_edit', trip) ? (r) => { setEditingReservation(r); setShowReservationModal(true); setMobileSidebarOpen(null) } : undefined} />
-                      : <PlacesSidebar tripId={tripId} places={places} categories={categories} assignments={assignments} selectedDayId={selectedDayId} selectedPlaceId={selectedPlaceId} onPlaceClick={(placeId) => { handlePlaceClick(placeId); setMobileSidebarOpen(null) }} onAddPlace={() => { setEditingPlace(null); setShowPlaceForm(true); setMobileSidebarOpen(null) }} onAssignToDay={handleAssignToDay} onEditPlace={(place) => { setEditingPlace(place); setEditingAssignmentId(null); setShowPlaceForm(true); setMobileSidebarOpen(null) }} onDeletePlace={(placeId) => handleDeletePlace(placeId)} onBulkDeletePlaces={(ids) => setDeletePlaceIds(ids)} onBulkDeleteConfirm={(ids) => confirmDeletePlaces(ids)} days={days} isMobile onCategoryFilterChange={setMapCategoryFilter} onPlacesFilterChange={setMapPlacesFilter} pushUndo={pushUndo} />
+                      : <PlacesSidebar tripId={tripId} places={places} categories={categories} assignments={assignments} selectedDayId={selectedDayId} selectedPlaceId={selectedPlaceId} onPlaceClick={(placeId) => { handlePlaceClick(placeId); setMobileSidebarOpen(null) }} onAddPlace={() => { setEditingPlace(null); setShowPlaceForm(true); setMobileSidebarOpen(null) }} onAssignToDay={handleAssignToDay} onEditPlace={(place) => { setEditingPlace(place); setEditingAssignmentId(null); setShowPlaceForm(true); setMobileSidebarOpen(null) }} onDeletePlace={(placeId) => handleDeletePlace(placeId)} onBulkDeletePlaces={(ids) => setDeletePlaceIds(ids)} onBulkDeleteConfirm={(ids) => confirmDeletePlaces(ids)} days={days} isMobile onCategoryFilterChange={setMapCategoryFilter} onPlacesFilterChange={setMapPlacesFilter} hideFilters={focusedMapDayId != null} focusedDayId={focusedMapDayId} pushUndo={pushUndo} />
                     }
                   </div>
                 </div>

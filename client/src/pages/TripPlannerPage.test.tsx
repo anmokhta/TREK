@@ -1525,6 +1525,7 @@ describe('TripPlannerPage', () => {
       });
 
       expect(screen.getByText(/Map Focus:/i)).toBeInTheDocument();
+      expect(capturedPlacesSidebarProps.current.hideFilters).toBe(true);
 
       await act(async () => {
         fireEvent.click(screen.getByRole('button', { name: /Clear map focus/i }));
@@ -1533,6 +1534,7 @@ describe('TripPlannerPage', () => {
       await waitFor(() => {
         expect(screen.queryByText(/Map Focus:/i)).not.toBeInTheDocument();
       });
+      expect(capturedPlacesSidebarProps.current.hideFilters).toBe(false);
     });
   });
 });

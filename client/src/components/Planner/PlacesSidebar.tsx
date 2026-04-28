@@ -33,6 +33,8 @@ interface PlacesSidebarProps {
   isMobile: boolean
   onCategoryFilterChange?: (categoryIds: Set<string>) => void
   onPlacesFilterChange?: (filter: string) => void
+  hideFilters?: boolean
+  focusedDayId?: number | null
   pushUndo?: (label: string, undoFn: () => Promise<void> | void) => void
 }
 
@@ -144,7 +146,7 @@ const MemoPlaceRow = React.memo(function MemoPlaceRow({
 
 const PlacesSidebar = React.memo(function PlacesSidebar({
   tripId, places, categories, assignments, selectedDayId, selectedPlaceId,
-  onPlaceClick, onAddPlace, onAssignToDay, onEditPlace, onDeletePlace, onBulkDeletePlaces, onBulkDeleteConfirm, days, isMobile, onCategoryFilterChange, onPlacesFilterChange, pushUndo,
+  onPlaceClick, onAddPlace, onAssignToDay, onEditPlace, onDeletePlace, onBulkDeletePlaces, onBulkDeleteConfirm, days, isMobile, onCategoryFilterChange, onPlacesFilterChange, hideFilters = false, focusedDayId = null, pushUndo,
 }: PlacesSidebarProps) {
   const { t } = useTranslation()
   const toast = useToast()
@@ -277,7 +279,16 @@ const PlacesSidebar = React.memo(function PlacesSidebar({
     Object.values(assignments).flatMap(da => da.map(a => a.place?.id).filter(Boolean))
   ), [assignments])
 
+  const focusedDayPlaceIds = useMemo(() => {
+    if (focusedDayId == null) return null
+    return new Set<number>((assignments[String(focusedDayId)] || []).map((a: any) => a.place?.id).filter(Boolean))
+  }, [assignments, focusedDayId])
+
   const filtered = useMemo(() => places.filter(p => {
+    if (hideFilters) {
+      if (!focusedDayPlaceIds) return true
+      return focusedDayPlaceIds.has(p.id)
+    }
     if (filter === 'unplanned' && plannedIds.has(p.id)) return false
     if (filter === 'tracks' && !p.route_geometry) return false
     if (categoryFilters.size > 0) {
@@ -288,7 +299,7 @@ const PlacesSidebar = React.memo(function PlacesSidebar({
     if (search && !p.name.toLowerCase().includes(search.toLowerCase()) &&
         !(p.address || '').toLowerCase().includes(search.toLowerCase())) return false
     return true
-  }), [places, filter, categoryFilters, search, plannedIds])
+  }), [places, filter, categoryFilters, search, plannedIds, hideFilters, focusedDayPlaceIds])
 
   const isAssignedToSelectedDay = (placeId) =>
     selectedDayId && (assignments[String(selectedDayId)] || []).some(a => a.place?.id === placeId)
@@ -377,86 +388,100 @@ const PlacesSidebar = React.memo(function PlacesSidebar({
         <div style={{ height: 1, background: 'var(--border-primary)', margin: '2px 0 10px' }} />
         </>}
 
-        {/* Filter-Tabs */}
-        {(() => {
-          const baseFiltered = places.filter(p => {
-            if (categoryFilters.size > 0) {
-              if (p.category_id == null) {
-                if (!categoryFilters.has('uncategorized')) return false
-              } else if (!categoryFilters.has(String(p.category_id))) return false
-            }
-            if (search && !p.name.toLowerCase().includes(search.toLowerCase()) &&
-                !(p.address || '').toLowerCase().includes(search.toLowerCase())) return false
-            return true
-          })
-          const counts = {
-            all: baseFiltered.length,
-            unplanned: baseFiltered.filter(p => !plannedIds.has(p.id)).length,
-            tracks: baseFiltered.filter(p => p.route_geometry).length,
-          }
-          const tabs = ([
-            { id: 'all', label: t('places.all') },
-            { id: 'unplanned', label: t('places.unplanned') },
-            hasTracks ? { id: 'tracks', label: t('places.filterTracks') } : null,
-          ] as const).filter(Boolean) as Array<{ id: 'all' | 'unplanned' | 'tracks'; label: string }>
-          return (
-            <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
-              {tabs.map(f => {
-                const active = filter === f.id
-                return (
-                  <button
-                    key={f.id}
-                    onClick={() => { setFilter(f.id); onPlacesFilterChange?.(f.id); setSelectedIds(new Set()) }}
-                    style={{
-                      appearance: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit',
-                      display: 'inline-flex', alignItems: 'center', gap: 5,
-                      padding: '4px 9px', borderRadius: 99,
-                      fontSize: 11, fontWeight: 500, whiteSpace: 'nowrap',
-                      background: active ? 'var(--accent)' : 'var(--bg-card)',
-                      color: active ? 'var(--accent-text)' : 'var(--text-primary)',
-                      boxShadow: active ? 'none' : '0 1px 2px rgba(0,0,0,0.06)',
-                      transition: 'background 0.15s, color 0.15s, box-shadow 0.15s',
-                    }}
-                  >
-                    {f.label}
-                    <span style={{
-                      fontSize: 9, fontWeight: 600, lineHeight: 1,
-                      background: active ? 'color-mix(in srgb, var(--accent-text) 22%, transparent)' : 'var(--bg-tertiary)',
-                      color: active ? 'var(--accent-text)' : 'var(--text-faint)',
-                      padding: '1px 5px', borderRadius: 99, minWidth: 14, textAlign: 'center',
-                    }}>
-                      {counts[f.id]}
-                    </span>
-                  </button>
-                )
-              })}
+        {hideFilters ? (
+          <div style={{
+            marginBottom: 8,
+            padding: '6px 10px',
+            borderRadius: 8,
+            border: '1px solid var(--border-faint)',
+            background: 'var(--bg-tertiary)',
+          }}>
+            <span style={{ display: 'block', fontSize: 11, lineHeight: 1.25, color: 'var(--text-faint)' }}>
+              Day focus is active. Place filters are temporarily disabled.
+            </span>
+          </div>
+        ) : (
+          <>
+            {/* Filter-Tabs */}
+            {(() => {
+              const baseFiltered = places.filter(p => {
+                if (categoryFilters.size > 0) {
+                  if (p.category_id == null) {
+                    if (!categoryFilters.has('uncategorized')) return false
+                  } else if (!categoryFilters.has(String(p.category_id))) return false
+                }
+                if (search && !p.name.toLowerCase().includes(search.toLowerCase()) &&
+                    !(p.address || '').toLowerCase().includes(search.toLowerCase())) return false
+                return true
+              })
+              const counts = {
+                all: baseFiltered.length,
+                unplanned: baseFiltered.filter(p => !plannedIds.has(p.id)).length,
+                tracks: baseFiltered.filter(p => p.route_geometry).length,
+              }
+              const tabs = ([
+                { id: 'all', label: t('places.all') },
+                { id: 'unplanned', label: t('places.unplanned') },
+                hasTracks ? { id: 'tracks', label: t('places.filterTracks') } : null,
+              ] as const).filter(Boolean) as Array<{ id: 'all' | 'unplanned' | 'tracks'; label: string }>
+              return (
+                <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+                  {tabs.map(f => {
+                    const active = filter === f.id
+                    return (
+                      <button
+                        key={f.id}
+                        onClick={() => { setFilter(f.id); onPlacesFilterChange?.(f.id); setSelectedIds(new Set()) }}
+                        style={{
+                          appearance: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+                          display: 'inline-flex', alignItems: 'center', gap: 5,
+                          padding: '4px 9px', borderRadius: 99,
+                          fontSize: 11, fontWeight: 500, whiteSpace: 'nowrap',
+                          background: active ? 'var(--accent)' : 'var(--bg-card)',
+                          color: active ? 'var(--accent-text)' : 'var(--text-primary)',
+                          boxShadow: active ? 'none' : '0 1px 2px rgba(0,0,0,0.06)',
+                          transition: 'background 0.15s, color 0.15s, box-shadow 0.15s',
+                        }}
+                      >
+                        {f.label}
+                        <span style={{
+                          fontSize: 9, fontWeight: 600, lineHeight: 1,
+                          background: active ? 'color-mix(in srgb, var(--accent-text) 22%, transparent)' : 'var(--bg-tertiary)',
+                          color: active ? 'var(--accent-text)' : 'var(--text-faint)',
+                          padding: '1px 5px', borderRadius: 99, minWidth: 14, textAlign: 'center',
+                        }}>
+                          {counts[f.id]}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )
+            })()}
+
+            {/* Suchfeld */}
+            <div style={{ position: 'relative' }}>
+              <Search size={13} strokeWidth={1.8} color="var(--text-faint)" style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
+              <input
+                type="text"
+                value={search}
+                onChange={e => { setSearch(e.target.value); if (selectMode) setSelectedIds(new Set()) }}
+                placeholder={t('places.search')}
+                style={{
+                  width: '100%', padding: '7px 30px 7px 30px', borderRadius: 10,
+                  border: 'none', background: 'var(--bg-tertiary)', fontSize: 12, color: 'var(--text-primary)',
+                  outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box',
+                }}
+              />
+              {search && (
+                <button onClick={() => setSearch('')} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex' }}>
+                  <X size={12} strokeWidth={2} color="var(--text-faint)" />
+                </button>
+              )}
             </div>
-          )
-        })()}
 
-        {/* Suchfeld */}
-        <div style={{ position: 'relative' }}>
-          <Search size={13} strokeWidth={1.8} color="var(--text-faint)" style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
-          <input
-            type="text"
-            value={search}
-            onChange={e => { setSearch(e.target.value); if (selectMode) setSelectedIds(new Set()) }}
-            placeholder={t('places.search')}
-            style={{
-              width: '100%', padding: '7px 30px 7px 30px', borderRadius: 10,
-              border: 'none', background: 'var(--bg-tertiary)', fontSize: 12, color: 'var(--text-primary)',
-              outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box',
-            }}
-          />
-          {search && (
-            <button onClick={() => setSearch('')} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex' }}>
-              <X size={12} strokeWidth={2} color="var(--text-faint)" />
-            </button>
-          )}
-        </div>
-
-        {/* Category multi-select dropdown */}
-        {categories.length > 0 && (() => {
+            {/* Category multi-select dropdown */}
+            {categories.length > 0 && (() => {
           const label = categoryFilters.size === 0
             ? t('places.allCategories')
             : categoryFilters.size === 1
@@ -575,7 +600,9 @@ const PlacesSidebar = React.memo(function PlacesSidebar({
               )}
             </div>
           )
-        })()}
+            })()}
+          </>
+        )}
       </div>
 
       {/* Anzahl / Auswahl-Leiste */}

@@ -208,6 +208,27 @@ describe('Filter tabs', () => {
     await user.click(screen.getByRole('button', { name: /Unplanned/i }));
     expect(screen.getByText(/All places are planned/i)).toBeInTheDocument();
   });
+
+  it('FE-PLANNER-SIDEBAR-019A: when day focus is active, places list shows only focused day places', () => {
+    const day1Place = buildPlace({ id: 101, name: 'Day 1 Place' });
+    const day2Place = buildPlace({ id: 202, name: 'Day 2 Place' });
+    const assignments = {
+      '1': [buildAssignment({ day_id: 1, place: day1Place })],
+      '2': [buildAssignment({ day_id: 2, place: day2Place })],
+    };
+    render(
+      <PlacesSidebar
+        {...defaultProps}
+        places={[day1Place, day2Place]}
+        assignments={assignments as any}
+        hideFilters
+        focusedDayId={1}
+      />
+    );
+    expect(screen.getByText('Day 1 Place')).toBeInTheDocument();
+    expect(screen.queryByText('Day 2 Place')).not.toBeInTheDocument();
+    expect(screen.getByText(/Day focus is active/i)).toBeInTheDocument();
+  });
 });
 
 // ── Search ────────────────────────────────────────────────────────────────────
