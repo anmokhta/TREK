@@ -26,7 +26,7 @@ import BudgetPanel from '../components/Budget/BudgetPanel'
 import CollabPanel from '../components/Collab/CollabPanel'
 import Navbar from '../components/Layout/Navbar'
 import { useToast } from '../components/shared/Toast'
-import { Map, X, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Ticket, PackageCheck, Wallet, FolderOpen, Users, Train } from 'lucide-react'
+import { Map, X, Eye, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Ticket, PackageCheck, Wallet, FolderOpen, Users, Train } from 'lucide-react'
 import { useTranslation } from '../i18n'
 import { addonsApi, accommodationsApi, authApi, tripsApi, assignmentsApi, mapsApi } from '../api/client'
 import { accommodationRepo } from '../repo/accommodationRepo'
@@ -355,11 +355,12 @@ export default function TripPlannerPage(): React.ReactElement | null {
   const [mapPlacesFilter, setMapPlacesFilter] = useState<string>('all')
 
   const [expandedDayIds, setExpandedDayIds] = useState<Set<number> | null>(null)
+  const [focusedMapDayId, setFocusedMapDayId] = useState<number | null>(null)
 
   const mapPlaces = useMemo(() => {
     // Build set of place IDs assigned to collapsed days
     const hiddenPlaceIds = new Set<number>()
-    if (expandedDayIds) {
+    if (expandedDayIds && focusedMapDayId == null) {
       for (const [dayId, dayAssignments] of Object.entries(assignments)) {
         if (!expandedDayIds.has(Number(dayId))) {
           for (const a of dayAssignments) {
@@ -377,6 +378,10 @@ export default function TripPlannerPage(): React.ReactElement | null {
       }
     }
 
+    const focusedPlaceIds = focusedMapDayId == null
+      ? null
+      : new Set((assignments[String(focusedMapDayId)] || []).map(a => a.place?.id).filter(Boolean))
+
     // Build set of planned place IDs for unplanned filter
     const plannedIds = mapPlacesFilter === 'unplanned'
       ? new Set(Object.values(assignments).flatMap(da => da.map(a => a.place?.id).filter(Boolean)))
@@ -390,11 +395,12 @@ export default function TripPlannerPage(): React.ReactElement | null {
           if (!mapCategoryFilter.has('uncategorized')) return false
         } else if (!mapCategoryFilter.has(String(p.category_id))) return false
       }
+      if (focusedPlaceIds && !focusedPlaceIds.has(p.id)) return false
       if (hiddenPlaceIds.has(p.id)) return false
       if (plannedIds && plannedIds.has(p.id)) return false
       return true
     })
-  }, [places, mapCategoryFilter, mapPlacesFilter, assignments, expandedDayIds])
+  }, [places, mapCategoryFilter, mapPlacesFilter, assignments, expandedDayIds, focusedMapDayId])
 
   const { route, routeSegments, routeInfo, setRoute, setRouteInfo, updateRouteForDay } = useRouteCalculation({ assignments } as any, selectedDayId)
 
@@ -714,6 +720,12 @@ export default function TripPlannerPage(): React.ReactElement | null {
   const mapTileUrl = settings.map_tile_url || 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
   const defaultCenter = [settings.default_lat || 48.8566, settings.default_lng || 2.3522]
   const defaultZoom = settings.default_zoom || 10
+  const focusedDayLabel = useMemo(() => {
+    if (focusedMapDayId == null) return null
+    const idx = days.findIndex(d => d.id === focusedMapDayId)
+    if (idx === -1) return null
+    return days[idx].title || t('dayplan.dayN', { n: idx + 1 })
+  }, [focusedMapDayId, days, t])
 
   const fontStyle = { fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" }
 
@@ -827,6 +839,50 @@ export default function TripPlannerPage(): React.ReactElement | null {
               }}
             />
 
+            {focusedMapDayId != null && focusedDayLabel && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 12,
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  zIndex: 22,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: '7px 10px',
+                  borderRadius: 999,
+                  border: '1px solid rgba(37,99,235,0.25)',
+                  background: 'rgba(255,255,255,0.88)',
+                  backdropFilter: 'blur(8px)',
+                  WebkitBackdropFilter: 'blur(8px)',
+                  boxShadow: '0 6px 16px rgba(0,0,0,0.12)',
+                }}
+              >
+                <Eye size={14} style={{ color: '#2563eb' }} />
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>
+                  Map Focus: {focusedDayLabel}
+                </span>
+                <button
+                  onClick={() => setFocusedMapDayId(null)}
+                  aria-label="Clear map focus"
+                  style={{
+                    border: 'none',
+                    background: 'none',
+                    padding: 0,
+                    margin: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    color: 'var(--text-faint)',
+                  }}
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            )}
+
 
             <div className="hidden md:block" style={{ position: 'absolute', left: 10, top: 10, bottom: 10, zIndex: 20 }}>
               <button onClick={() => setLeftCollapsed(c => !c)}
@@ -886,6 +942,8 @@ export default function TripPlannerPage(): React.ReactElement | null {
                   accommodations={tripAccommodations}
                   onNavigateToFiles={() => handleTabChange('dateien')}
                   onExpandedDaysChange={setExpandedDayIds}
+                  focusedMapDayId={focusedMapDayId}
+                  onFocusedMapDayChange={setFocusedMapDayId}
                   pushUndo={pushUndo}
                   canUndo={canUndo}
                   lastActionLabel={lastActionLabel}
@@ -1109,7 +1167,7 @@ export default function TripPlannerPage(): React.ReactElement | null {
                   </div>
                   <div style={{ flex: 1, overflow: 'auto' }}>
                     {mobileSidebarOpen === 'left'
-                      ? <DayPlanSidebar tripId={tripId} trip={trip} days={days} places={places} categories={categories} assignments={assignments} selectedDayId={selectedDayId} selectedPlaceId={selectedPlaceId} selectedAssignmentId={selectedAssignmentId} onSelectDay={(id) => { handleSelectDay(id); setMobileSidebarOpen(null) }} onPlaceClick={(placeId, assignmentId) => { handlePlaceClick(placeId, assignmentId); setMobileSidebarOpen(null) }} onReorder={handleReorder} onUpdateDayTitle={handleUpdateDayTitle} onAssignToDay={handleAssignToDay} onRouteCalculated={(r) => { if (r) { setRoute(r.coordinates); setRouteInfo({ distance: r.distanceText, duration: r.durationText }) } }} reservations={reservations} visibleConnectionIds={visibleConnections} onToggleConnection={toggleConnection} onAddReservation={(dayId) => { setEditingReservation(null); tripActions.setSelectedDay(dayId); setShowReservationModal(true); setMobileSidebarOpen(null) }} onAddPlace={() => { setEditingPlace(null); setShowPlaceForm(true); setMobileSidebarOpen(null) }} onDayDetail={(day) => { setShowDayDetail(day); setSelectedPlaceId(null); selectAssignment(null); setMobileSidebarOpen(null) }} accommodations={tripAccommodations} onNavigateToFiles={() => { setMobileSidebarOpen(null); handleTabChange('dateien') }} onExpandedDaysChange={setExpandedDayIds} pushUndo={pushUndo} canUndo={canUndo} lastActionLabel={lastActionLabel} onUndo={handleUndo} onEditTransport={can('day_edit', trip) ? (reservation) => { setEditingTransport(reservation); setTransportModalDayId(reservation.day_id ?? null); setShowTransportModal(true); setMobileSidebarOpen(null) } : undefined} onEditReservation={can('reservation_edit', trip) ? (r) => { setEditingReservation(r); setShowReservationModal(true); setMobileSidebarOpen(null) } : undefined} />
+                      ? <DayPlanSidebar tripId={tripId} trip={trip} days={days} places={places} categories={categories} assignments={assignments} selectedDayId={selectedDayId} selectedPlaceId={selectedPlaceId} selectedAssignmentId={selectedAssignmentId} onSelectDay={(id) => { handleSelectDay(id); setMobileSidebarOpen(null) }} onPlaceClick={(placeId, assignmentId) => { handlePlaceClick(placeId, assignmentId); setMobileSidebarOpen(null) }} onReorder={handleReorder} onUpdateDayTitle={handleUpdateDayTitle} onAssignToDay={handleAssignToDay} onRouteCalculated={(r) => { if (r) { setRoute(r.coordinates); setRouteInfo({ distance: r.distanceText, duration: r.durationText }) } }} reservations={reservations} visibleConnectionIds={visibleConnections} onToggleConnection={toggleConnection} onAddReservation={(dayId) => { setEditingReservation(null); tripActions.setSelectedDay(dayId); setShowReservationModal(true); setMobileSidebarOpen(null) }} onAddPlace={() => { setEditingPlace(null); setShowPlaceForm(true); setMobileSidebarOpen(null) }} onDayDetail={(day) => { setShowDayDetail(day); setSelectedPlaceId(null); selectAssignment(null); setMobileSidebarOpen(null) }} accommodations={tripAccommodations} onNavigateToFiles={() => { setMobileSidebarOpen(null); handleTabChange('dateien') }} onExpandedDaysChange={setExpandedDayIds} focusedMapDayId={focusedMapDayId} onFocusedMapDayChange={setFocusedMapDayId} pushUndo={pushUndo} canUndo={canUndo} lastActionLabel={lastActionLabel} onUndo={handleUndo} onEditTransport={can('day_edit', trip) ? (reservation) => { setEditingTransport(reservation); setTransportModalDayId(reservation.day_id ?? null); setShowTransportModal(true); setMobileSidebarOpen(null) } : undefined} onEditReservation={can('reservation_edit', trip) ? (r) => { setEditingReservation(r); setShowReservationModal(true); setMobileSidebarOpen(null) } : undefined} />
                       : <PlacesSidebar tripId={tripId} places={places} categories={categories} assignments={assignments} selectedDayId={selectedDayId} selectedPlaceId={selectedPlaceId} onPlaceClick={(placeId) => { handlePlaceClick(placeId); setMobileSidebarOpen(null) }} onAddPlace={() => { setEditingPlace(null); setShowPlaceForm(true); setMobileSidebarOpen(null) }} onAssignToDay={handleAssignToDay} onEditPlace={(place) => { setEditingPlace(place); setEditingAssignmentId(null); setShowPlaceForm(true); setMobileSidebarOpen(null) }} onDeletePlace={(placeId) => handleDeletePlace(placeId)} onBulkDeletePlaces={(ids) => setDeletePlaceIds(ids)} onBulkDeleteConfirm={(ids) => confirmDeletePlaces(ids)} days={days} isMobile onCategoryFilterChange={setMapCategoryFilter} onPlacesFilterChange={setMapPlacesFilter} pushUndo={pushUndo} />
                     }
                   </div>

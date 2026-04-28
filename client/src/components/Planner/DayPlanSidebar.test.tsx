@@ -208,6 +208,24 @@ describe('DayPlanSidebar', () => {
     expect(screen.getByText('Eiffel Tower')).toBeInTheDocument()
   })
 
+  it('FE-PLANNER-DAYPLAN-008A: clicking day-map-focus icon calls onFocusedMapDayChange with day id', async () => {
+    const user = userEvent.setup()
+    const day = buildDay({ id: 10, date: '2025-06-01', title: 'Day 1' })
+    const onFocusedMapDayChange = vi.fn()
+    render(<DayPlanSidebar {...makeDefaultProps({ days: [day], onFocusedMapDayChange })} />)
+    await user.click(screen.getByRole('button', { name: /Show only this day on map/i }))
+    expect(onFocusedMapDayChange).toHaveBeenCalledWith(10)
+  })
+
+  it('FE-PLANNER-DAYPLAN-008B: clicking active day-map-focus icon resets focus to all days', async () => {
+    const user = userEvent.setup()
+    const day = buildDay({ id: 10, date: '2025-06-01', title: 'Day 1' })
+    const onFocusedMapDayChange = vi.fn()
+    render(<DayPlanSidebar {...makeDefaultProps({ days: [day], focusedMapDayId: 10, onFocusedMapDayChange })} />)
+    await user.click(screen.getByRole('button', { name: /Show all map locations/i }))
+    expect(onFocusedMapDayChange).toHaveBeenCalledWith(null)
+  })
+
   // ── Day selection ───────────────────────────────────────────────────────
 
   it('FE-PLANNER-DAYPLAN-009: clicking day header calls onSelectDay', async () => {

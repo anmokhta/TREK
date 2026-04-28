@@ -4,7 +4,7 @@ declare global { interface Window { __dragData: DragDataPayload | null } }
 
 import React, { useState, useEffect, useRef, useMemo } from 'react'
 import ReactDOM from 'react-dom'
-import { ChevronDown, ChevronRight, ChevronUp, ChevronsDownUp, ChevronsUpDown, Navigation, RotateCcw, ExternalLink, Clock, Pencil, GripVertical, Ticket, Plus, FileText, Check, Trash2, Info, MapPin, Star, Heart, Camera, Lightbulb, Flag, Bookmark, Train, Bus, Plane, Car, Ship, Coffee, ShoppingBag, AlertTriangle, FileDown, Lock, Hotel, Utensils, Users, Undo2, X, Route as RouteIcon } from 'lucide-react'
+import { ChevronDown, ChevronRight, ChevronUp, ChevronsDownUp, ChevronsUpDown, Navigation, RotateCcw, ExternalLink, Clock, Pencil, GripVertical, Ticket, Plus, FileText, Check, Trash2, Info, MapPin, Star, Heart, Camera, Lightbulb, Flag, Bookmark, Train, Bus, Plane, Car, Ship, Coffee, ShoppingBag, AlertTriangle, FileDown, Lock, Hotel, Utensils, Users, Undo2, X, Eye, Route as RouteIcon } from 'lucide-react'
 
 const RES_ICONS = { flight: Plane, hotel: Hotel, restaurant: Utensils, train: Train, car: Car, cruise: Ship, event: Ticket, tour: Users, other: FileText }
 import { assignmentsApi, reservationsApi } from '../../api/client'
@@ -180,6 +180,8 @@ interface DayPlanSidebarProps {
   onAddPlace?: () => void
   onAddPlaceToDay?: (placeId: number, dayId: number) => void
   onExpandedDaysChange?: (expandedDayIds: Set<number>) => void
+  focusedMapDayId?: number | null
+  onFocusedMapDayChange?: (dayId: number | null) => void
   pushUndo?: (label: string, undoFn: () => Promise<void> | void) => void
   canUndo?: boolean
   lastActionLabel?: string | null
@@ -208,6 +210,8 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar({
   onAddPlaceToDay,
   onNavigateToFiles,
   onExpandedDaysChange,
+  focusedMapDayId = null,
+  onFocusedMapDayChange,
   pushUndo,
   canUndo = false,
   lastActionLabel = null,
@@ -1125,6 +1129,7 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar({
           const formattedDate = formatDate(day.date, locale)
           const loc = da.find(a => a.place?.lat && a.place?.lng)
           const isDragTarget = dragOverDayId === day.id
+          const isMapFocusActive = focusedMapDayId === day.id
           const merged = mergedItemsMap[day.id] || []
           const dayNoteUi = noteUi[day.id]
           const placeItems = merged.filter(i => i.type === 'place')
@@ -1276,6 +1281,32 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar({
                 >
                   <FileText size={16} strokeWidth={2} />
                 </button></Tooltip>}
+                {!!onFocusedMapDayChange && (
+                  <Tooltip label={isMapFocusActive ? 'Show all map locations' : 'Show only this day on map'} placement="top">
+                    <button
+                      onClick={e => {
+                        e.stopPropagation()
+                        onFocusedMapDayChange(isMapFocusActive ? null : day.id)
+                      }}
+                      aria-label={isMapFocusActive ? 'Show all map locations' : 'Show only this day on map'}
+                      style={{
+                        flexShrink: 0,
+                        background: isMapFocusActive ? 'rgba(59,130,246,0.12)' : 'none',
+                        border: isMapFocusActive ? '1px solid rgba(59,130,246,0.35)' : 'none',
+                        padding: 6,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        color: isMapFocusActive ? '#2563eb' : 'var(--text-faint)',
+                        borderRadius: 6,
+                      }}
+                      onMouseEnter={e => { if (!isMapFocusActive) e.currentTarget.style.color = 'var(--text-primary)' }}
+                      onMouseLeave={e => { if (!isMapFocusActive) e.currentTarget.style.color = 'var(--text-faint)' }}
+                    >
+                      <Eye size={16} strokeWidth={2} />
+                    </button>
+                  </Tooltip>
+                )}
                 <button
                   onClick={e => toggleDay(day.id, e)}
                   style={{ flexShrink: 0, background: 'none', border: 'none', padding: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', color: 'var(--text-faint)' }}

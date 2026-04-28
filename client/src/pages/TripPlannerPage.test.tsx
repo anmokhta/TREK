@@ -1507,4 +1507,32 @@ describe('TripPlannerPage', () => {
       });
     });
   });
+
+  describe('FE-PAGE-PLANNER-051: focused day map chip is shown and can be cleared', () => {
+    it('shows "Map Focus" chip after day focus callback and hides it when cleared', async () => {
+      vi.useFakeTimers();
+      const { day } = seedTripStore({ id: 42 });
+      renderPlannerPage(42);
+      act(() => { vi.runAllTimers(); });
+      vi.useRealTimers();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('day-plan-sidebar')).toBeInTheDocument();
+      });
+
+      await act(async () => {
+        capturedDayPlanSidebarProps.current.onFocusedMapDayChange?.(day.id);
+      });
+
+      expect(screen.getByText(/Map Focus:/i)).toBeInTheDocument();
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /Clear map focus/i }));
+      });
+
+      await waitFor(() => {
+        expect(screen.queryByText(/Map Focus:/i)).not.toBeInTheDocument();
+      });
+    });
+  });
 });
