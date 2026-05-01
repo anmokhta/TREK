@@ -1,11 +1,11 @@
 // Trip PDF via browser print window
-import { createElement } from 'react'
+import { createElement, useEffect } from 'react'
 import { createRoot } from 'react-dom/client'
+import { MapContainer, TileLayer, useMap } from 'react-leaflet'
 import { getCategoryIcon } from '../shared/categoryIcons'
 import { FileText, Info, Clock, MapPin, Navigation, Train, Plane, Bus, Car, Ship, Coffee, Ticket, Star, Heart, Camera, Flag, Lightbulb, AlertTriangle, ShoppingBag, Bookmark, Hotel, LogIn, LogOut, KeyRound, BedDouble, Utensils, Users, LucideIcon } from 'lucide-react'
 import { accommodationsApi, mapsApi } from '../../api/client'
 import type { Trip, Day, Place, Category, AssignmentsMap, DayNotesMap } from '../../types'
-import { MapViewAuto } from '../Map/MapViewAuto'
 import html2canvas from 'html2canvas'
 
 function renderLucideIcon(icon:LucideIcon, props = {}) {
@@ -23,6 +23,8 @@ function noteIconSvg(iconId) {
 
 const RESERVATION_ICON_MAP = { flight: Plane, train: Train, bus: Bus, car: Car, cruise: Ship, restaurant: Utensils, event: Ticket, tour: Users, other: FileText }
 const RESERVATION_COLOR_MAP = { flight: '#3b82f6', train: '#06b6d4', bus: '#6b7280', car: '#6b7280', cruise: '#0ea5e9', restaurant: '#ef4444', event: '#f59e0b', tour: '#10b981', other: '#6b7280' }
+
+const SEGMENT_COLORS = ['#e74c3c', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4', '#f97316', '#ec4899']
 function reservationIconSvg(type) {
   const Icon = RESERVATION_ICON_MAP[type] || Ticket
   const color = RESERVATION_COLOR_MAP[type] || '#3b82f6'
@@ -105,13 +107,29 @@ function haversineKm(aLat: number, aLng: number, bLat: number, bLng: number) {
   return 2 * R * Math.atan2(Math.sqrt(q), Math.sqrt(1 - q))
 }
 
-function getDayMapSvgDataUri(dayPlaces, transparent = false, projection: any = null) {
+interface SegmentInfo {
+  color: string
+  fromIdx: number
+  toIdx: number
+  fromName: string
+  toName: string
+  walkMin: number
+  driveMin: number
+}
+
+function getDayMapSvgDataUri(
+  dayPlaces,
+  transparent = false,
+  projection: any = null,
+  coloredRoutes = true,
+  showTimeBadges = true,
+) {
   const geo = (dayPlaces || []).filter((p: any) => p?.lat && p?.lng).slice(0, 30)
-  if (!geo.length) return { src: null, coordSummary: '' }
+  if (!geo.length) return { src: null, coordSummary: '', segments: [] as SegmentInfo[] }
 
   const pad = 18
   const width = 1000
-  const height = 300
+  const height = 520
   const lats = geo.map((p: any) => Number(p.lat))
   const lngs = geo.map((p: any) => Number(p.lng))
   const minLat = Math.min(...lats)
@@ -139,19 +157,53 @@ function getDayMapSvgDataUri(dayPlaces, transparent = false, projection: any = n
     return { x, y, lat: Number(p.lat), lng: Number(p.lng) }
   })
 
-  const polyline = points.map(pt => `${pt.x.toFixed(2)},${pt.y.toFixed(2)}`).join(' ')
-  let totalKm = 0
-  for (let i = 1; i < points.length; i++) {
-    totalKm += haversineKm(points[i - 1].lat, points[i - 1].lng, points[i].lat, points[i].lng)
-  }
-  const walkMin = Math.max(1, Math.round((totalKm / 4.8) * 60))
-  const driveMin = Math.max(1, Math.round((totalKm / 38) * 60))
-  const durationBadge = points.length > 1 ? `
-    <g>
-      <rect x="${(width / 2 - 84).toFixed(2)}" y="${(height / 2 - 20).toFixed(2)}" rx="14" ry="14" width="168" height="34" fill="#111827" opacity="0.94" />
-      <text x="${(width / 2).toFixed(2)}" y="${(height / 2 + 2).toFixed(2)}" text-anchor="middle" font-size="15" fill="#ffffff" font-weight="600" font-family="Poppins, sans-serif">🚶 ${walkMin} min  |  🚗 ${driveMin} min</text>
-    </g>
-  ` : ''
+  // Build per-segment data (distances + colors) used for both SVG and legend
+  const segmentData: SegmentInfo[] = points.slice(1).map((pt, i) => {
+    const prev = points[i]
+    const km = haversineKm(prev.lat, prev.lng, pt.lat, pt.lng)
+    return {
+      color: coloredRoutes ? SEGMENT_COLORS[i % SEGMENT_COLORS.length] : '#1f2937',
+      fromIdx: i + 1,
+      toIdx: i + 2,
+      fromName: geo[i]?.name ?? '',
+      toName: geo[i + 1]?.name ?? '',
+      walkMin: Math.max(1, Math.round((km / 4.8) * 60)),
+      driveMin: Math.max(1, Math.round((km / 38) * 60)),
+    }
+  })
+
+  // Per-segment colored (or single unified gray) polyline segments
+  const routeLines = coloredRoutes
+    ? segmentData.map((seg, i) => {
+        const prev = points[i]
+        const pt = points[i + 1]
+        return `<polyline points="${prev.x.toFixed(2)},${prev.y.toFixed(2)} ${pt.x.toFixed(2)},${pt.y.toFixed(2)}" fill="none" stroke="${seg.color}" stroke-width="4" opacity="0.9" stroke-dasharray="8 8" stroke-linecap="round" stroke-linejoin="round" />`
+      }).join('')
+    : points.length > 1
+      ? `<polyline points="${points.map(pt => `${pt.x.toFixed(2)},${pt.y.toFixed(2)}`).join(' ')}" fill="none" stroke="#1f2937" stroke-width="4" opacity="0.75" stroke-dasharray="8 8" stroke-linecap="round" stroke-linejoin="round" />`
+      : ''
+
+  const segmentBadges = showTimeBadges ? segmentData.map((seg, i) => {
+    const prev = points[i]
+    const pt = points[i + 1]
+    const midX = (prev.x + pt.x) / 2
+    const midY = (prev.y + pt.y) / 2
+    const dx = pt.x - prev.x
+    const dy = pt.y - prev.y
+    const len = Math.hypot(dx, dy) || 1
+    const nx = -dy / len
+    const ny = dx / len
+    const lane = (i % 2 === 0) ? 1 : -1
+    const shift = 18
+    const mx = Math.max(46, Math.min(width - 46, midX + nx * shift * lane))
+    const my = Math.max(14, Math.min(height - 14, midY + ny * shift * lane))
+    return `
+      <g>
+        <rect x="${(mx - 46).toFixed(2)}" y="${(my - 9).toFixed(2)}" rx="8" ry="8" width="92" height="18" fill="${seg.color}" opacity="0.92" />
+        <text x="${mx.toFixed(2)}" y="${(my + 3).toFixed(2)}" text-anchor="middle" font-size="8.6" fill="#ffffff" font-weight="600" font-family="Poppins, sans-serif">🚶 ${seg.walkMin}m · 🚗 ${seg.driveMin}m</text>
+      </g>
+    `
+  }).join('') : ''
 
   const circles = points.map((pt, i) => `
     <g>
@@ -177,14 +229,21 @@ function getDayMapSvgDataUri(dayPlaces, transparent = false, projection: any = n
         <line x1="${width / 3}" y1="0" x2="${width / 3}" y2="${height}" />
         <line x1="${(width / 3) * 2}" y1="0" x2="${(width / 3) * 2}" y2="${height}" />
       </g>
-      ${points.length > 1 ? `<polyline points="${polyline}" fill="none" stroke="#1f2937" stroke-width="4" opacity="0.75" stroke-dasharray="8 8" stroke-linecap="round" stroke-linejoin="round" />` : ''}
-      ${durationBadge}
+      ${routeLines}
+      ${segmentBadges}
       ${circles}
     </svg>
   `
   const coordSummary = points.map(pt => `${pt.lat},${pt.lng}`).join(';')
   const outOfBounds = points.filter((pt: any) => pt.x < -24 || pt.x > width + 24 || pt.y < -24 || pt.y > height + 24).length
-  return { src: `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`, coordSummary, outOfBounds, pointCount: points.length }
+  return {
+    src: `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`,
+    coordSummary,
+    outOfBounds,
+    pointCount: points.length,
+    badgeCount: Math.max(0, points.length - 1),
+    segments: segmentData,
+  }
 }
 
 function latLngToWorldPixel(lat: number, lng: number, zoom: number) {
@@ -205,73 +264,121 @@ function chooseTileZoom(geo: any[], width: number, height: number) {
   for (let zoom = 16; zoom >= 8; zoom--) {
     const nw = latLngToWorldPixel(maxLat, minLng, zoom)
     const se = latLngToWorldPixel(minLat, maxLng, zoom)
-    if ((se.x - nw.x) <= width * 0.72 && (se.y - nw.y) <= height * 0.72) return zoom
+    // Fit almost edge-to-edge so we avoid an overly zoomed-out map.
+    if ((se.x - nw.x) <= width * 0.9 && (se.y - nw.y) <= height * 0.9) return zoom
   }
   return 8
 }
 
-async function buildDayMapTileBase(dayPlaces: any[]) {
+// Child component rendered inside MapContainer that fires onReady with the map instance
+// once all tiles have loaded (or after a timeout).
+function TileReadyNotifier({ onReady }: { onReady: (map: any) => void }) {
+  const map = useMap()
+  useEffect(() => {
+    let done = false
+    const fire = () => { if (!done) { done = true; onReady(map) } }
+    // tileloadend fires when the last queued tile for any layer finishes loading
+    map.on('tileloadend', fire)
+    // Hard cap: capture even if some tiles are slow / fail
+    const timer = setTimeout(fire, 4000)
+    return () => {
+      map.off('tileloadend', fire)
+      clearTimeout(timer)
+    }
+  }, [map, onReady])
+  return null
+}
+
+async function captureDayMapScreenshot(dayPlaces: any[]): Promise<{ src: string, projection: { zoom: number, topLeftX: number, topLeftY: number, width: number, height: number } } | null> {
   const geo = (dayPlaces || []).filter((p: any) => p?.lat && p?.lng)
   if (!geo.length || typeof window === 'undefined' || typeof document === 'undefined') return null
+  // jsdom cannot render Leaflet tiles; fall back to SVG in tests
   if ((import.meta as any)?.env?.MODE === 'test' || (/jsdom/i).test(navigator.userAgent || '')) return null
+
   const width = 1000
-  const height = 300
+  const height = 520
+  const lats = geo.map((p: any) => Number(p.lat))
+  const lngs = geo.map((p: any) => Number(p.lng))
+  const centerLat = (Math.min(...lats) + Math.max(...lats)) / 2
+  const centerLng = (Math.min(...lngs) + Math.max(...lngs)) / 2
   const zoom = chooseTileZoom(geo, width, height)
-  const centerLat = geo.reduce((sum: number, p: any) => sum + Number(p.lat), 0) / geo.length
-  const centerLng = geo.reduce((sum: number, p: any) => sum + Number(p.lng), 0) / geo.length
-  const center = latLngToWorldPixel(centerLat, centerLng, zoom)
-  const topLeftX = center.x - width / 2
-  const topLeftY = center.y - height / 2
-  const minTileX = Math.floor(topLeftX / 256)
-  const maxTileX = Math.floor((topLeftX + width) / 256)
-  const minTileY = Math.floor(topLeftY / 256)
-  const maxTileY = Math.floor((topLeftY + height) / 256)
-  const tileSpan = Math.pow(2, zoom)
-  const canvas = document.createElement('canvas')
-  canvas.width = width
-  canvas.height = height
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return null
-  ctx.fillStyle = '#eef2ff'
-  ctx.fillRect(0, 0, width, height)
-  let drawn = 0
-  const started = Date.now()
-  await Promise.all(Array.from({ length: maxTileX - minTileX + 1 }).flatMap((_, xi) => {
-    const tileX = minTileX + xi
-    return Array.from({ length: maxTileY - minTileY + 1 }).map(async (_, yi) => {
-      const tileY = minTileY + yi
-      if (tileY < 0 || tileY >= tileSpan) return
-      const wrappedTileX = ((tileX % tileSpan) + tileSpan) % tileSpan
+
+  const host = document.createElement('div')
+  host.style.cssText = `position:fixed;left:-9999px;top:0;width:${width}px;height:${height}px;z-index:-1;overflow:hidden;`
+  document.body.appendChild(host)
+  const root = createRoot(host)
+
+  return new Promise<{ src: string, projection: any } | null>((resolve) => {
+    let settled = false
+    const finish = async (mapInstance: any) => {
+      if (settled) return
+      settled = true
       try {
-        const url = `https://tile.openstreetmap.org/${zoom}/${wrappedTileX}/${tileY}.png`
-        const res = await fetch(url, { mode: 'cors' })
-        if (!res.ok) return
-        const blob = await res.blob()
-        const objectUrl = URL.createObjectURL(blob)
-        try {
-          const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-            const im = new Image()
-            im.onload = () => resolve(im)
-            im.onerror = reject
-            im.src = objectUrl
-          })
-          const px = tileX * 256 - topLeftX
-          const py = tileY * 256 - topLeftY
-          ctx.drawImage(img, px, py, 256, 256)
-          drawn += 1
-        } finally {
-          URL.revokeObjectURL(objectUrl)
+        // Brief yield so the final tile paint flushes to the DOM
+        await new Promise(r => setTimeout(r, 120))
+        const canvas = await html2canvas(host, {
+          useCORS: true,
+          allowTaint: false,
+          backgroundColor: '#f8fafc',
+          scale: 1,
+          logging: false,
+          width,
+          height,
+          x: 0,
+          y: 0,
+        })
+        // Derive projection from Leaflet's own view so overlay math stays accurate
+        let topLeftX = 0, topLeftY = 0, capturedZoom = zoom
+        if (mapInstance) {
+          try {
+            const bounds = mapInstance.getPixelBounds()
+            topLeftX = bounds.min.x
+            topLeftY = bounds.min.y
+            capturedZoom = mapInstance.getZoom()
+          } catch {}
         }
-      } catch {}
-    })
-  }))
-  // #region agent log
-  fetch('http://127.0.0.1:7866/ingest/26632cea-2631-44e3-813d-bd32f54c9e64',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c1b570'},body:JSON.stringify({sessionId:'c1b570',runId:'pdf-map-debug-3',hypothesisId:'H8',location:'TripPDF.tsx:buildDayMapTileBase',message:'Built OSM tile base map',data:{geoCount:geo.length,zoom,tileCount:(maxTileX-minTileX+1)*(maxTileY-minTileY+1),drawnTiles:drawn,elapsedMs:Date.now()-started},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
-  return drawn > 0 ? {
-    src: canvas.toDataURL('image/png'),
-    projection: { zoom, topLeftX, topLeftY, width, height },
-  } : null
+        // #region agent log
+        fetch('http://127.0.0.1:7866/ingest/26632cea-2631-44e3-813d-bd32f54c9e64',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c1b570'},body:JSON.stringify({sessionId:'c1b570',runId:'pdf-map-debug-5',hypothesisId:'H13',location:'TripPDF.tsx:captureDayMapScreenshot',message:'Leaflet html2canvas capture result',data:{geoCount:geo.length,capturedZoom,width:canvas.width,height:canvas.height,srcLength:canvas.toDataURL('image/png').length},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
+        resolve({ src: canvas.toDataURL('image/png'), projection: { zoom: capturedZoom, topLeftX, topLeftY, width, height } })
+      } catch (err) {
+        // #region agent log
+        fetch('http://127.0.0.1:7866/ingest/26632cea-2631-44e3-813d-bd32f54c9e64',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c1b570'},body:JSON.stringify({sessionId:'c1b570',runId:'pdf-map-debug-5',hypothesisId:'H13',location:'TripPDF.tsx:captureDayMapScreenshot',message:'Leaflet html2canvas capture failed',data:{error:String(err)},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
+        resolve(null)
+      } finally {
+        root.unmount()
+        host.remove()
+      }
+    }
+
+    root.render(
+      createElement(MapContainer, {
+        center: [centerLat, centerLng] as [number, number],
+        zoom,
+        zoomControl: false,
+        attributionControl: false,
+        style: { width: `${width}px`, height: `${height}px`, background: '#f8fafc' },
+      },
+        createElement(TileLayer, {
+          url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+          crossOrigin: 'anonymous' as any,
+          maxZoom: 19,
+        }),
+        createElement(TileReadyNotifier, { onReady: finish })
+      )
+    )
+
+    // Absolute safety net: resolve null if nothing fires within 8s
+    setTimeout(() => {
+      if (!settled) {
+        settled = true
+        root.unmount()
+        host.remove()
+        resolve(null)
+      }
+    }, 8000)
+  })
 }
 
 async function composeMapLayers(baseSrc: string | null, overlaySrc: string | null) {
@@ -323,6 +430,12 @@ async function fetchPlacePhotos(assignments) {
   return photoMap
 }
 
+interface PdfOptions {
+  includeMaps?: boolean
+  coloredRoutes?: boolean
+  showTimeBadges?: boolean
+}
+
 interface downloadTripPDFProps {
   trip: Trip
   days: Day[]
@@ -333,9 +446,11 @@ interface downloadTripPDFProps {
   reservations?: any[]
   t: (key: string, params?: Record<string, string | number>) => string
   locale: string
+  pdfOptions?: PdfOptions
 }
 
-export async function downloadTripPDF({ trip, days, places, assignments, categories, dayNotes, reservations = [], t: _t, locale: _locale }: downloadTripPDFProps) {
+export async function downloadTripPDF({ trip, days, places, assignments, categories, dayNotes, reservations = [], t: _t, locale: _locale, pdfOptions = {} }: downloadTripPDFProps) {
+  const { includeMaps = true, coloredRoutes = true, showTimeBadges = true } = pdfOptions
   await ensureRenderer()
   const loc = _locale || undefined
   const tr = _t || (k => k)
@@ -354,46 +469,27 @@ export async function downloadTripPDF({ trip, days, places, assignments, categor
   const totalCost = Object.values(assignments || {})
     .flatMap(a => a).reduce((s, a) => s + (parseFloat(a.place?.price) || 0), 0)
 
-  const dayMapDataById: Record<string, { screenshotSrc: string | null, coordSummary: string }> = {}
-  const mapBuildStartedAt = Date.now()
-  await Promise.all(sorted.map(async (day) => {
-    const perDayStartedAt = Date.now()
-    const assigned = assignments[String(day.id)] || []
-    const dayMapPlaces = [...new Map(
-      assigned.map(a => [a.place?.id, a.place]).filter(([, p]) => p?.lat && p?.lng)
-    ).values()]
-    // #region agent log
-    fetch('http://127.0.0.1:7866/ingest/26632cea-2631-44e3-813d-bd32f54c9e64',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c1b570'},body:JSON.stringify({sessionId:'c1b570',runId:'pdf-map-debug-1',hypothesisId:'H2',location:'TripPDF.tsx:dayMapPlaces',message:'Computed day geo places for PDF map',data:{dayId:day.id,assignedCount:assigned.length,geoCount:dayMapPlaces.length,geoPlaceIds:dayMapPlaces.map((p:any)=>p?.id)},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
-    const coords = dayMapPlaces.map((p: any) => `${Number(p.lat)},${Number(p.lng)}`).join(';')
-    const tileBase = await buildDayMapTileBase(dayMapPlaces)
-    const overlay = getDayMapSvgDataUri(dayMapPlaces, true, tileBase?.projection || null)
-    // #region agent log
-    fetch('http://127.0.0.1:7866/ingest/26632cea-2631-44e3-813d-bd32f54c9e64',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c1b570'},body:JSON.stringify({sessionId:'c1b570',runId:'pdf-map-debug-2',hypothesisId:'H5',location:'TripPDF.tsx:overlayGeneration',message:'Generated overlay SVG metadata',data:{dayId:day.id,overlayPresent:!!overlay.src,overlayLength:overlay.src?String(overlay.src).length:0,coordSummary:coords,outOfBounds:overlay.outOfBounds,pointCount:overlay.pointCount},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
-    if (tileBase?.src) {
-      const merged = await composeMapLayers(tileBase.src, overlay.src)
-      // #region agent log
-      fetch('http://127.0.0.1:7866/ingest/26632cea-2631-44e3-813d-bd32f54c9e64',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c1b570'},body:JSON.stringify({sessionId:'c1b570',runId:'pdf-map-debug-3',hypothesisId:'H10',location:'TripPDF.tsx:composeMapLayers',message:'Composed OSM base with route overlay',data:{dayId:day.id,merged:!!merged,mergedPrefix:merged?String(merged).slice(0,32):null,mergedLength:merged?String(merged).length:0},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
-      dayMapDataById[String(day.id)] = { screenshotSrc: merged, coordSummary: coords }
-      // #region agent log
-      fetch('http://127.0.0.1:7866/ingest/26632cea-2631-44e3-813d-bd32f54c9e64',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c1b570'},body:JSON.stringify({sessionId:'c1b570',runId:'pdf-map-debug-3',hypothesisId:'H9',location:'TripPDF.tsx:mapSourceSelection',message:'Using OSM tile base for day map',data:{dayId:day.id,overlayPresent:!!overlay.src,coordSummary:coords},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
-    } else {
-      const fallback = getDayMapSvgDataUri(dayMapPlaces, false)
-      dayMapDataById[String(day.id)] = { screenshotSrc: fallback.src, coordSummary: fallback.coordSummary }
-      // #region agent log
-      fetch('http://127.0.0.1:7866/ingest/26632cea-2631-44e3-813d-bd32f54c9e64',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c1b570'},body:JSON.stringify({sessionId:'c1b570',runId:'pdf-map-debug-3',hypothesisId:'H9',location:'TripPDF.tsx:mapSourceSelection',message:'Falling back to generated SVG day map',data:{dayId:day.id,fallbackPresent:!!fallback.src,fallbackCoordSummary:fallback.coordSummary},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
-    }
-    // #region agent log
-    fetch('http://127.0.0.1:7866/ingest/26632cea-2631-44e3-813d-bd32f54c9e64',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c1b570'},body:JSON.stringify({sessionId:'c1b570',runId:'pdf-map-debug-3',hypothesisId:'H7',location:'TripPDF.tsx:perDayMapTiming',message:'Per-day map generation timing',data:{dayId:day.id,elapsedMs:Date.now()-perDayStartedAt,usedOsmTiles:!!tileBase?.src,geoCount:dayMapPlaces.length},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
-  }))
-  // #region agent log
-  fetch('http://127.0.0.1:7866/ingest/26632cea-2631-44e3-813d-bd32f54c9e64',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c1b570'},body:JSON.stringify({sessionId:'c1b570',runId:'pdf-map-debug-2',hypothesisId:'H7',location:'TripPDF.tsx:totalMapTiming',message:'Total map generation timing for PDF',data:{dayCount:sorted.length,totalElapsedMs:Date.now()-mapBuildStartedAt},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
+  const dayMapDataById: Record<string, { screenshotSrc: string | null, coordSummary: string, segments: SegmentInfo[] }> = {}
+
+  if (includeMaps) {
+    // Parallel: each capture is isolated (own div, own React root, own Leaflet instance)
+    await Promise.all(sorted.map(async (day) => {
+      const assigned = assignments[String(day.id)] || []
+      const dayMapPlaces = [...new Map(
+        assigned.map(a => [a.place?.id, a.place]).filter(([, p]) => p?.lat && p?.lng)
+      ).values()]
+      const coords = dayMapPlaces.map((p: any) => `${Number(p.lat)},${Number(p.lng)}`).join(';')
+      const captured = await captureDayMapScreenshot(dayMapPlaces)
+      const overlay = getDayMapSvgDataUri(dayMapPlaces, true, captured?.projection || null, coloredRoutes, showTimeBadges)
+      if (captured?.src) {
+        const merged = await composeMapLayers(captured.src, overlay.src)
+        dayMapDataById[String(day.id)] = { screenshotSrc: merged, coordSummary: coords, segments: overlay.segments }
+      } else {
+        const fallback = getDayMapSvgDataUri(dayMapPlaces, false, null, coloredRoutes, showTimeBadges)
+        dayMapDataById[String(day.id)] = { screenshotSrc: fallback.src, coordSummary: fallback.coordSummary, segments: fallback.segments }
+      }
+    }))
+  }
 
   // Span helpers for multi-day transport (mirrors DayPlanSidebar logic)
   const pdfGetDayOrder = (d: Day) => d.day_number
@@ -435,9 +531,9 @@ export async function downloadTripPDF({ trip, days, places, assignments, categor
   // Build day HTML
   const daysHtml = sorted.map((day, di) => {
     const assigned = assignments[String(day.id)] || []
-    const dayMapData = dayMapDataById[String(day.id)] || { screenshotSrc: null, coordSummary: '' }
+    const dayMapData = dayMapDataById[String(day.id)] || { screenshotSrc: null, coordSummary: '', segments: [] as SegmentInfo[] }
     // #region agent log
-    fetch('http://127.0.0.1:7866/ingest/26632cea-2631-44e3-813d-bd32f54c9e64',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c1b570'},body:JSON.stringify({sessionId:'c1b570',runId:'pdf-map-debug-1',hypothesisId:'H4',location:'TripPDF.tsx:daysHtml',message:'Rendering day map block',data:{dayId:day.id,hasBase:!!dayMapData.screenshotSrc,coordSummary:dayMapData.coordSummary},timestamp:Date.now()})}).catch(()=>{});
+    fetch('http://127.0.0.1:7866/ingest/26632cea-2631-44e3-813d-bd32f54c9e64',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c1b570'},body:JSON.stringify({sessionId:'c1b570',runId:'pdf-map-debug-5',hypothesisId:'H13',location:'TripPDF.tsx:daysHtml',message:'Rendering day map block',data:{dayId:day.id,hasBase:!!dayMapData.screenshotSrc,coordSummary:dayMapData.coordSummary},timestamp:Date.now()})}).catch(()=>{});
     // #endregion
     const notes = (dayNotes || []).filter(n => n.day_id === day.id)
     const cost = dayCost(assignments, day.id, loc)
@@ -578,7 +674,7 @@ export async function downloadTripPDF({ trip, days, places, assignments, categor
       : ''
 
     return `
-      <div class="day-section${di > 0 ? ' page-break' : ''}">
+      <div class="day-section">
         <div class="day-header">
           <span class="day-tag">${escHtml(tr('dayplan.dayN', { n: day.day_number })).toUpperCase()}</span>
           <span class="day-title">${escHtml(day.title || tr('dayplan.dayN', { n: day.day_number }))}</span>
@@ -590,6 +686,16 @@ export async function downloadTripPDF({ trip, days, places, assignments, categor
           ${dayMapData.screenshotSrc ? `
             <div class="day-map-wrap">
               <img class="day-map-img day-map-base" data-coords="${escHtml(dayMapData.coordSummary)}" src="${escHtml(dayMapData.screenshotSrc)}" alt="${escHtml(`Day ${day.day_number} map`)}" />
+              ${coloredRoutes && dayMapData.segments.length > 0 ? `
+                <div class="map-legend">
+                  ${dayMapData.segments.map(seg => `
+                    <div class="map-legend-item">
+                      <span class="map-legend-swatch" style="background:${seg.color}"></span>
+                      <span class="map-legend-label">${seg.fromIdx}&rarr;${seg.toIdx}${seg.fromName ? ` &middot; ${escHtml(seg.fromName)} &rarr; ${escHtml(seg.toName)}` : ''} &middot; &#x1F6B6; ${seg.walkMin}m &middot; &#x1F697; ${seg.driveMin}m</span>
+                    </div>
+                  `).join('')}
+                </div>
+              ` : ''}
             </div>
           ` : ''}
         </div>
@@ -665,7 +771,10 @@ export async function downloadTripPDF({ trip, days, places, assignments, categor
   .cover-stat-lbl { font-size: 9px; font-weight: 500; color: rgba(255,255,255,0.4); letter-spacing: 1px; margin-top: 4px; text-transform: uppercase; }
 
   /* ── Day ───────────────────────────────────────── */
-  .page-break { page-break-before: always; }
+  .day-section {
+    page-break-inside: avoid;
+    margin-bottom: 10px;
+  }
   .day-header {
     background: #0f172a; padding: 11px 28px;
     display: flex; align-items: center; gap: 8px;
@@ -686,9 +795,33 @@ export async function downloadTripPDF({ trip, days, places, assignments, categor
   }
   .day-map-img {
     width: 100%;
-    height: 176px;
+    height: 380px;
     object-fit: cover;
     display: block;
+  }
+  .map-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px 14px;
+    padding: 7px 10px;
+    background: #f8fafc;
+    border-top: 1px solid #e2e8f0;
+  }
+  .map-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .map-legend-swatch {
+    width: 20px;
+    height: 4px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+  .map-legend-label {
+    font-size: 8px;
+    color: #334155;
+    white-space: nowrap;
   }
 
   /* accommodation info */
@@ -766,6 +899,7 @@ export async function downloadTripPDF({ trip, days, places, assignments, categor
   @media print {
     body { margin: 0; }
     .cover { min-height: 100vh; page-break-after: always; }
+    .day-section { break-inside: avoid; page-break-inside: avoid; }
     @page { margin: 0; }
   }
 </style>

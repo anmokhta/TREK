@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Settings, Palette, Map, Bell, Plug, CloudOff, User, Info } from 'lucide-react'
+import { Settings, Palette, Map, Bell, Plug, CloudOff, User, Info, FileDown } from 'lucide-react'
 import { useTranslation } from '../i18n'
 import { authApi } from '../api/client'
 import { useAddonStore } from '../store/addonStore'
@@ -13,6 +13,7 @@ import IntegrationsTab from '../components/Settings/IntegrationsTab'
 import AccountTab from '../components/Settings/AccountTab'
 import AboutTab from '../components/Settings/AboutTab'
 import OfflineTab from '../components/Settings/OfflineTab'
+import ExportSettingsTab from '../components/Settings/ExportSettingsTab'
 
 export default function SettingsPage(): React.ReactElement {
   const { t } = useTranslation()
@@ -45,6 +46,7 @@ export default function SettingsPage(): React.ReactElement {
     ...(hasIntegrations
       ? [{ id: 'integrations', label: t('settings.tabs.integrations'), icon: Plug }]
       : []),
+    { id: 'export', label: 'Export', icon: FileDown },
     { id: 'offline', label: t('settings.tabs.offline'), icon: CloudOff },
     { id: 'account', label: t('settings.tabs.account'), icon: User },
     ...(appVersion
@@ -81,6 +83,7 @@ export default function SettingsPage(): React.ReactElement {
             {activeTab === 'map' && <MapSettingsTab />}
             {activeTab === 'notifications' && <NotificationsTab />}
             {activeTab === 'integrations' && hasIntegrations && <IntegrationsTab />}
+            {activeTab === 'export' && <ExportSettingsTab />}
             {activeTab === 'offline' && <OfflineTab />}
             {activeTab === 'account' && <AccountTab />}
             {activeTab === 'about' && appVersion && <AboutTab appVersion={appVersion} />}

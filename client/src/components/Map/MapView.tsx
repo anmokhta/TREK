@@ -568,6 +568,7 @@ export const MapView = memo(function MapView({
       <TileLayer
         url={tileUrl}
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+        crossOrigin="anonymous"
         maxZoom={19}
         keepBuffer={8}
         updateWhenZooming={false}

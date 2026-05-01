@@ -959,8 +959,13 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar({
                 const flatNotes = Object.entries(dayNotes).flatMap(([dayId, notes]) =>
                   notes.map(n => ({ ...n, day_id: Number(dayId) }))
                 )
+                const pdfOptions = {
+                  includeMaps:    localStorage.getItem('pdf_include_maps')    !== 'false',
+                  coloredRoutes:  localStorage.getItem('pdf_colored_routes')  !== 'false',
+                  showTimeBadges: localStorage.getItem('pdf_show_time_badges') !== 'false',
+                }
                 try {
-                  await downloadTripPDF({ trip, days, places, assignments, categories, dayNotes: flatNotes, reservations, t, locale })
+                  await downloadTripPDF({ trip, days, places, assignments, categories, dayNotes: flatNotes, reservations, t, locale, pdfOptions })
                 } catch (e) {
                   console.error('PDF error:', e)
                   toast.error(t('dayplan.pdfError') + ': ' + (e?.message || String(e)))
